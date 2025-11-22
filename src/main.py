@@ -1,12 +1,13 @@
 import sys
-from pathlib import Path
+import logging
 import asyncio
 import tempfile
+from pathlib import Path
 from collections import defaultdict
-from aiogram import Bot, Dispatcher, Router
-from aiogram.filters import Command
-from aiogram.types import Message, FSInputFile
 from aiogram import F
+from aiogram.filters import Command
+from aiogram import Bot, Dispatcher, Router
+from aiogram.types import Message, FSInputFile
 from config import TOKEN, REFERENCE_BOOK_FILE_PATH
 from services.reference_book import ReferenceBook
 from services.file_processor import FileProcessor
@@ -19,6 +20,11 @@ REFERENCE_PATH = Path(REFERENCE_BOOK_FILE_PATH)
 TEMP_DIR = Path(tempfile.gettempdir()) / "tg_bot_files"
 TEMP_DIR.mkdir(parents=True, exist_ok=True)
 
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+)
+
+logger = logging.getLogger(__name__)
 
 user_state = defaultdict(lambda: {"results": [], "timer": None, "chat_id": None})
 
@@ -73,7 +79,6 @@ async def handle_document(message: Message):
         )
 
     except Exception as e:
-        # Сразу отправляем ошибку
         await message.reply(f"❌ {doc.file_name}\n{str(e)}")
 
         state["results"].append(
@@ -104,7 +109,6 @@ async def schedule_batch(user_id: int):
         total = len(results)
         success_count = sum(1 for r in results if r["success"])
 
-        # Отправляем только итоговое сообщение (файлы уже отправлены)
         if total > 1:
             lines = [
                 f"Обработка завершена: {total} файл(ов)",
@@ -115,7 +119,6 @@ async def schedule_batch(user_id: int):
 
             await bot.send_message(state["chat_id"], "\n".join(lines))
 
-        # Очистка временных файлов
         for r in results:
             for key in ("temp_input", "result_path"):
                 if path := r.get(key):
@@ -129,20 +132,20 @@ async def schedule_batch(user_id: int):
 
 async def on_startup():
     if not REFERENCE_PATH.exists():
-        print(f"ОШИБКА: Справочник не найден: {REFERENCE_PATH}")
+        logger.error("ОШИБКА: Справочник не найден: %s", REFERENCE_PATH)
         sys.exit(1)
 
     try:
         await ReferenceBook.load(REFERENCE_PATH)
     except PermissionError:
-        print(f"ОШИБКА: Нет доступа к файлу справочника: {REFERENCE_PATH}")
+        logger.error("ОШИБКА: Нет доступа к файлу справочника: %s", REFERENCE_PATH)
         sys.exit(1)
-    except Exception:
-        print("ОШИБКА при загрузке справочника: {e}")
+    except Exception as e:
+        logger.error("ОШИБКА при загрузке справочника: %s", e)
         sys.exit(1)
 
-    if not ReferenceBook.is_empty():
-        print("ОШИБКА: Справочник пуст (нет данных)")
+    if ReferenceBook.is_empty():
+        logger.error("ОШИБКА: Справочник пуст (нет данных)")
         sys.exit(1)
 
     async def _reference_refresher():
@@ -151,17 +154,18 @@ async def on_startup():
                 await asyncio.sleep(ReferenceBook.get_cache_lifetime_seconds())
                 await ReferenceBook.load(REFERENCE_PATH)
 
-                if not ReferenceBook.is_empty():
-                    print("ПРЕДУПРЕЖДЕНИЕ: Справочник обновлен, но пуст")
+                if ReferenceBook.is_empty():
+                    logger.warning("ПРЕДУПРЕЖДЕНИЕ: Справочник обновлен, но пуст")
                 else:
-                    print(
-                        f"Справочник обновлен: {ReferenceBook.get_cache_size()} записей"
+                    logger.info(
+                        "Справочник обновлен: %s записей",
+                        ReferenceBook.get_cache_size(),
                     )
             except PermissionError:
-                print(f"Ошибка доступа к справочнику: {REFERENCE_PATH}")
+                logger.error("Ошибка доступа к справочнику: %s", REFERENCE_PATH)
                 await asyncio.sleep(60)
             except Exception as e:
-                print(f"Ошибка обновления справочника: {e}")
+                logger.error("Ошибка обновления справочника: %s", e)
                 await asyncio.sleep(60)
 
     asyncio.create_task(_reference_refresher())
@@ -170,7 +174,7 @@ async def on_startup():
 async def main():
     dp.startup.register(on_startup)
     dp.include_router(router)
-    print("Бот запущен и готов к работе")
+    logger.info("Бот запущен и готов к работе")
     await dp.start_polling(bot)
 
 
