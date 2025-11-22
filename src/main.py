@@ -5,7 +5,7 @@ import tempfile
 from collections import defaultdict
 from aiogram import Bot, Dispatcher, Router
 from aiogram.filters import Command
-from aiogram.types import Message, FSInputFile, InputMediaDocument
+from aiogram.types import Message, FSInputFile
 from aiogram import F
 from config import TOKEN, REFERENCE_BOOK_FILE_PATH
 from services.reference_book import ReferenceBook
@@ -20,11 +20,8 @@ TEMP_DIR = Path(tempfile.gettempdir()) / "tg_bot_files"
 TEMP_DIR.mkdir(parents=True, exist_ok=True)
 
 
-user_state = defaultdict(lambda: {
-    "results": [],
-    "timer": None,
-    "chat_id": None
-})
+user_state = defaultdict(lambda: {"results": [], "timer": None, "chat_id": None})
+
 
 @router.message(Command("start"))
 async def start(message: Message):
@@ -34,13 +31,14 @@ async def start(message: Message):
         "Через 3 секунды после последнего файла пришлю результат."
     )
 
+
 @router.message(F.document)
 async def handle_document(message: Message):
     user_id = message.from_user.id
     chat_id = message.chat.id
     doc = message.document
 
-    if not doc.file_name or not doc.file_name.lower().endswith(('.xlsx', '.xls')):
+    if not doc.file_name or not doc.file_name.lower().endswith((".xlsx", ".xls")):
         await message.reply("Поддерживаются только .xlsx и .xls файлы")
         return
 
@@ -61,30 +59,34 @@ async def handle_document(message: Message):
 
         # Сразу отправляем результат
         await message.reply_document(
-            FSInputFile(temp_output),
-            caption=f"✅ {doc.file_name}\nАртикул: {article}"
+            FSInputFile(temp_output), caption=f"✅ {doc.file_name}\nАртикул: {article}"
         )
 
-        state["results"].append({
-            "success": True,
-            "filename": doc.file_name,
-            "article": article,
-            "result_path": temp_output,
-            "temp_input": temp_input
-        })
+        state["results"].append(
+            {
+                "success": True,
+                "filename": doc.file_name,
+                "article": article,
+                "result_path": temp_output,
+                "temp_input": temp_input,
+            }
+        )
 
     except Exception as e:
         # Сразу отправляем ошибку
         await message.reply(f"❌ {doc.file_name}\n{str(e)}")
-        
-        state["results"].append({
-            "success": False,
-            "filename": doc.file_name or "unknown",
-            "error": str(e),
-            "temp_input": temp_input
-        })
+
+        state["results"].append(
+            {
+                "success": False,
+                "filename": doc.file_name or "unknown",
+                "error": str(e),
+                "temp_input": temp_input,
+            }
+        )
 
     await schedule_batch(user_id)
+
 
 async def schedule_batch(user_id: int):
     state = user_state[user_id]
@@ -110,7 +112,7 @@ async def schedule_batch(user_id: int):
             ]
             if total - success_count > 0:
                 lines.append(f"❌ С ошибками: {total - success_count}")
-            
+
             await bot.send_message(state["chat_id"], "\n".join(lines))
 
         # Очистка временных файлов
@@ -124,29 +126,53 @@ async def schedule_batch(user_id: int):
     task = asyncio.create_task(send_summary())
     state["timer"] = task
 
-# Startup
+
 async def on_startup():
     if not REFERENCE_PATH.exists():
         print(f"ОШИБКА: Справочник не найден: {REFERENCE_PATH}")
         sys.exit(1)
-    await ReferenceBook.load(REFERENCE_PATH)
+
+    try:
+        await ReferenceBook.load(REFERENCE_PATH)
+    except PermissionError:
+        print(f"ОШИБКА: Нет доступа к файлу справочника: {REFERENCE_PATH}")
+        sys.exit(1)
+    except Exception:
+        print("ОШИБКА при загрузке справочника: {e}")
+        sys.exit(1)
+
+    if not ReferenceBook.is_empty():
+        print("ОШИБКА: Справочник пуст (нет данных)")
+        sys.exit(1)
+
     async def _reference_refresher():
         while True:
             try:
-                await asyncio.sleep(ReferenceBook._cache_lifetime.total_seconds())
+                await asyncio.sleep(ReferenceBook.get_cache_lifetime_seconds())
                 await ReferenceBook.load(REFERENCE_PATH)
-                print("Справочник обновлен")
+
+                if not ReferenceBook.is_empty():
+                    print("ПРЕДУПРЕЖДЕНИЕ: Справочник обновлен, но пуст")
+                else:
+                    print(
+                        f"Справочник обновлен: {ReferenceBook.get_cache_size()} записей"
+                    )
+            except PermissionError:
+                print(f"Ошибка доступа к справочнику: {REFERENCE_PATH}")
+                await asyncio.sleep(60)
             except Exception as e:
-                print("Ошибка обновления справочника:", e)
+                print(f"Ошибка обновления справочника: {e}")
                 await asyncio.sleep(60)
 
     asyncio.create_task(_reference_refresher())
+
 
 async def main():
     dp.startup.register(on_startup)
     dp.include_router(router)
     print("Бот запущен и готов к работе")
     await dp.start_polling(bot)
+
 
 if __name__ == "__main__":
     asyncio.run(main())

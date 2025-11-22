@@ -40,3 +40,18 @@ class ReferenceBook:
     def get_barcode(cls, article: str) -> Optional[str]:
         """Синхронный метод — теперь можно! Кэш уже гарантированно загружен"""
         return cls._cache.get(str(article).strip().upper())
+
+    @classmethod
+    def is_empty(cls) -> bool:
+        """Проверка, пуст ли справочник"""
+        return len(cls._cache) == 0
+
+    @classmethod
+    def get_cache_size(cls) -> int:
+        """Получить количество записей в справочнике"""
+        return len(cls._cache)
+
+    @classmethod
+    def get_cache_lifetime_seconds(cls) -> float:
+        """Получить время жизни кэша в секундах"""
+        return cls._cache_lifetime.total_seconds()
