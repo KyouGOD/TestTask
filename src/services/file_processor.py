@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 from typing import List
 import pandas as pd
@@ -11,10 +12,24 @@ class FileProcessor:
     @staticmethod
     def extract_article(filename: str) -> str:
         """
-        Извлекает артикул из названия файла.
-        Артикул — первое слово до первого пробела.
+        Извлекает артикул из названия файла
         """
-        return filename.split()[0].strip()
+        if not filename:
+            raise ValueError("Имя файла пустое")
+
+        name = Path(filename).stem
+
+        normalized = re.sub(r'[-_.–—]+', ' ', name)
+        normalized = re.sub(r'\s+', ' ', normalized)
+
+        first_word = normalized.split()[0].strip()
+
+        first_word = re.sub(r'^["\'\(\[\{]+|["\'\)\]\}]+$', '', first_word)
+
+        if not first_word:
+            raise ValueError(f"Не удалось извлечь артикул из файла: {filename}")
+
+        return first_word.upper()
 
     @staticmethod
     def read_codes_from_file(file_path: Path) -> List[str]:
