@@ -71,7 +71,6 @@ async def handle_document(message: Message):
             filename=doc.file_name,
         )
 
-        # Сразу отправляем результат
         await message.reply_document(
             FSInputFile(temp_output), caption=f"✅ {doc.file_name}\nАртикул: {article}"
         )
@@ -195,11 +194,26 @@ async def on_startup():
     asyncio.create_task(cleanup_old_states())
 
 
+async def on_shutdown():
+    logger.info("Завершение работы бота...")
+    for file in TEMP_DIR.glob("*"):
+        try:
+            file.unlink()
+        except Exception as e:
+            logger.error("Ошибка удаления %s: %s", file, e)
+
+    await bot.session.close()
+
+
 async def main():
     dp.startup.register(on_startup)
+    dp.shutdown.register(on_shutdown)
     dp.include_router(router)
     logger.info("Бот запущен и готов к работе")
-    await dp.start_polling(bot)
+    try:
+        await dp.start_polling(bot)
+    except (KeyboardInterrupt, SystemExit):
+        logger.info("Получен сигнал остановки")
 
 
 if __name__ == "__main__":
