@@ -3,9 +3,7 @@
   REFERENCE_BOOK_FILE_PATH=
 
 в docker-compose.yml:
-  путь на хост системе до справочника: путь внутри контейнера
-  
-  ./data:/app/data
-                          
+  путь на хост системе до справочника(./data:): путь внутри контейнера(/app/data)
+                            
 после создания .env:
   docker-compose up -d
