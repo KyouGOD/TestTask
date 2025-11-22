@@ -1,162 +1,151 @@
+import sys
 from pathlib import Path
 import asyncio
 import tempfile
-import os
-from aiogram import Bot, Dispatcher, Router, types
+from collections import defaultdict
+from aiogram import Bot, Dispatcher, Router
 from aiogram.filters import Command
+from aiogram.types import Message, FSInputFile, InputMediaDocument
 from aiogram import F
-from aiogram.types import Message, FSInputFile
 from config import TOKEN, REFERENCE_BOOK_FILE_PATH
 from services.reference_book import ReferenceBook
 from services.file_processor import FileProcessor
 
 bot = Bot(token=TOKEN)
-
-REFERENCE_PATH = Path(REFERENCE_BOOK_FILE_PATH)
-TEMP_DIR = Path(tempfile.gettempdir()) / "telegram_bot_files"
-TEMP_DIR.mkdir(exist_ok=True)
-
 dp = Dispatcher()
 router = Router()
 
-user_file_batches = {}
-batch_timers = {}
+REFERENCE_PATH = Path(REFERENCE_BOOK_FILE_PATH)
+TEMP_DIR = Path(tempfile.gettempdir()) / "tg_bot_files"
+TEMP_DIR.mkdir(parents=True, exist_ok=True)
+
+
+user_state = defaultdict(lambda: {
+    "results": [],
+    "timer": None,
+    "chat_id": None
+})
 
 @router.message(Command("start"))
 async def start(message: Message):
     await message.answer(
         "Бот для обработки файлов с кодами.\n\n"
-        "Отправьте файл Excel (.xlsx или .xls) для:\n"
-        "1. Извлечения артикула из названия файла\n"
-        "2. Поиска соответствующего штрихкода в справочнике\n"
-        "3. Обработки кодов из столбца B\n"
-        "4. Получения результирующего файла\n\n"
-        "Можно отправить несколько файлов подряд."
+        "Отправьте файл Excel (.xlsx или .xls) — можно несколько подряд.\n"
+        "Через 3 секунды после последнего файла пришлю результат."
     )
-
 
 @router.message(F.document)
 async def handle_document(message: Message):
-    """Обработчик входящих документов"""
     user_id = message.from_user.id
-    document = message.document
-    
-    # Проверяем формат файла
-    if not (document.file_name.lower().endswith('.xlsx') or document.file_name.lower().endswith('.xls')):
-        await message.reply(
-            "Файл должен быть в формате .xlsx или .xls"
-        )
+    chat_id = message.chat.id
+    doc = message.document
+
+    if not doc.file_name or not doc.file_name.lower().endswith(('.xlsx', '.xls')):
+        await message.reply("Поддерживаются только .xlsx и .xls файлы")
         return
-    
-    # Инициализируем счетчик файлов для пользователя
-    if user_id not in user_file_batches:
-        user_file_batches[user_id] = []
-    
-    # Скачиваем файл
-    temp_input_path = None
-    temp_output_path = None
-    
+
+    state = user_state[user_id]
+    state["chat_id"] = chat_id
+
+    temp_input = TEMP_DIR / f"{user_id}_{doc.file_id}_{doc.file_name}"
+
     try:
-        # Скачиваем файл во временную директорию
-        file = await bot.get_file(document.file_id)
-        temp_input_path = TEMP_DIR / f"{document.file_id}_{document.file_name}"
-        
-        await bot.download_file(file.file_path, temp_input_path)
+        file = await bot.get_file(doc.file_id)
+        await bot.download_file(file.file_path, temp_input)
 
-        # Обрабатываем файл
-        temp_output_path, article = FileProcessor.process_file(
-            input_file_path=temp_input_path,
+        temp_output, article = FileProcessor.process_file(
+            input_file_path=temp_input,
             output_dir=TEMP_DIR,
-            filename=document.file_name,
+            filename=doc.file_name,
         )
 
-        # Отправляем результирующий файл
-        result_file = FSInputFile(temp_output_path)
+        # Сразу отправляем результат
         await message.reply_document(
-            result_file,
-            caption=f"✅ Файл обработан успешно!\nАртикул: {article}"
+            FSInputFile(temp_output),
+            caption=f"✅ {doc.file_name}\nАртикул: {article}"
         )
 
-        # Добавляем в счетчик обработанных файлов
-        user_file_batches[user_id].append(document.file_name)
-
-        # Запускаем таймер для групповой обработки
-        await schedule_batch_completion(user_id)
-
-    except ValueError as e:
-        # Ошибки валидации
-        error_message = str(e)
-        if "не найден в справочнике" in error_message:
-            await message.reply(f"❌ {error_message}")
-        elif "не найдено кодов" in error_message:
-            await message.reply(f"❌ {error_message}")
-        else:
-            await message.reply(f"❌ Ошибка: {error_message}")
+        state["results"].append({
+            "success": True,
+            "filename": doc.file_name,
+            "article": article,
+            "result_path": temp_output,
+            "temp_input": temp_input
+        })
 
     except Exception as e:
-        # Общие ошибки
-        await message.reply(
-            f"❌ Произошла ошибка при обработке файла.\n"
-            f"Пожалуйста, проверьте формат файла и попробуйте снова.\n"
-            f"Детали: {str(e)}"
-        )
-    
-    finally:
-        # Удаляем временные файлы
-        if temp_input_path and temp_input_path.exists():
-            try:
-                os.remove(temp_input_path)
-            except:
-                pass
-        if temp_output_path and temp_output_path.exists():
-            try:
-                os.remove(temp_output_path)
-            except:
-                pass
-
-
-async def schedule_batch_completion(user_id: int):
-    """Планирует отправку итогового сообщения через 3 секунды"""
-    
-    # Отменяем предыдущий таймер, если он был
-    if user_id in batch_timers:
-        batch_timers[user_id].cancel()
-    
-    # Создаем новый таймер
-    async def send_batch_summary():
-        await asyncio.sleep(3)
+        # Сразу отправляем ошибку
+        await message.reply(f"❌ {doc.file_name}\n{str(e)}")
         
-        if user_id in user_file_batches and user_file_batches[user_id]:
-            file_count = len(user_file_batches[user_id])
-            
-            if file_count > 1:
-                await bot.send_message(
-                    user_id,
-                    f"Обработка завершена\n"
-                    f"Всего обработано файлов: {file_count}"
-                )
-            
-            user_file_batches[user_id] = []
-            
-        if user_id in batch_timers:
-            del batch_timers[user_id]
-    
-    # Запускаем таймер
-    task = asyncio.create_task(send_batch_summary())
-    batch_timers[user_id] = task
+        state["results"].append({
+            "success": False,
+            "filename": doc.file_name or "unknown",
+            "error": str(e),
+            "temp_input": temp_input
+        })
 
+    await schedule_batch(user_id)
 
-dp.include_router(router)
+async def schedule_batch(user_id: int):
+    state = user_state[user_id]
 
+    if state["timer"]:
+        state["timer"].cancel()
+
+    async def send_summary():
+        await asyncio.sleep(3.2)
+
+        results = state["results"]
+        if not results:
+            return
+
+        total = len(results)
+        success_count = sum(1 for r in results if r["success"])
+
+        # Отправляем только итоговое сообщение (файлы уже отправлены)
+        if total > 1:
+            lines = [
+                f"Обработка завершена: {total} файл(ов)",
+                f"✅ Успешно: {success_count}",
+            ]
+            if total - success_count > 0:
+                lines.append(f"❌ С ошибками: {total - success_count}")
+            
+            await bot.send_message(state["chat_id"], "\n".join(lines))
+
+        # Очистка временных файлов
+        for r in results:
+            for key in ("temp_input", "result_path"):
+                if path := r.get(key):
+                    Path(path).unlink(missing_ok=True)
+
+        del user_state[user_id]
+
+    task = asyncio.create_task(send_summary())
+    state["timer"] = task
+
+# Startup
 async def on_startup():
     if not REFERENCE_PATH.exists():
-        print(f"ОШИБКА: Файл справочника не найден: {REFERENCE_PATH}")
-        return
+        print(f"ОШИБКА: Справочник не найден: {REFERENCE_PATH}")
+        sys.exit(1)
     await ReferenceBook.load(REFERENCE_PATH)
-    print("Бот готов к работе!")
+    async def _reference_refresher():
+        while True:
+            try:
+                await asyncio.sleep(ReferenceBook._cache_lifetime.total_seconds())
+                await ReferenceBook.load(REFERENCE_PATH)
+                print("Справочник обновлен")
+            except Exception as e:
+                print("Ошибка обновления справочника:", e)
+                await asyncio.sleep(60)
+
+    asyncio.create_task(_reference_refresher())
 
 async def main():
     dp.startup.register(on_startup)
+    dp.include_router(router)
+    print("Бот запущен и готов к работе")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
