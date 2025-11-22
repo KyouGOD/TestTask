@@ -5,7 +5,7 @@
 в docker-compose.yml:
   путь на хост системе до справочника: путь внутри контейнера
   
-                               ./data:/app/data
+  ./data:/app/data
                           
 после создания .env:
   docker-compose up -d
