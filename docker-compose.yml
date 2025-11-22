@@ -1,0 +1,12 @@
+services:
+  excel-bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: excel-barcode-bot
+    restart: unless-stopped
+
+    volumes:
+      - ./data:/app/data # сюда справочник.xlsx
+      - ./temp:/app/temp
+      - ./.env:/app/.env
