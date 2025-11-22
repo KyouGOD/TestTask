@@ -19,12 +19,12 @@ class FileProcessor:
 
         name = Path(filename).stem
 
-        normalized = re.sub(r'[-_.–—]+', ' ', name)
-        normalized = re.sub(r'\s+', ' ', normalized)
+        normalized = re.sub(r"[-_.–—]+", " ", name)
+        normalized = re.sub(r"\s+", " ", normalized)
 
         first_word = normalized.split()[0].strip()
 
-        first_word = re.sub(r'^["\'\(\[\{]+|["\'\)\]\}]+$', '', first_word)
+        first_word = re.sub(r'^["\'\(\[\{]+|["\'\)\]\}]+$', "", first_word)
 
         if not first_word:
             raise ValueError(f"Не удалось извлечь артикул из файла: {filename}")
@@ -33,7 +33,9 @@ class FileProcessor:
 
     @staticmethod
     def read_codes_from_file(file_path: Path) -> List[str]:
-        df = pd.read_excel(file_path, header=None, skiprows=1, dtype=str, engine="openpyxl")
+        df = pd.read_excel(
+            file_path, header=None, skiprows=1, dtype=str, engine="openpyxl"
+        )
 
         if df.shape[1] < 2:
             return []
@@ -44,19 +46,15 @@ class FileProcessor:
         return codes
 
     @staticmethod
-    def create_result_file(
-        barcode: str,
-        codes: List[str],
-        output_path: Path
-    ) -> None:
+    def create_result_file(barcode: str, codes: List[str], output_path: Path) -> None:
         """
         Создает результирующий Excel файл с указанной структурой.
-        
+
         Структура файла:
         - Строка 1, столбец A: "коды"
         - Строка 2, столбец A: штрихкод
         - Строки 3+, столбец A: коды из входного файла
-        
+
         Args:
             article: Артикул (используется для названия файла)
             barcode: Штрихкод для записи во вторую строку
@@ -65,38 +63,35 @@ class FileProcessor:
         """
         wb = Workbook()
         ws = wb.active
-        
+
         # Первая строка: "коды"
-        ws['A1'] = "коды"
-        
+        ws["A1"] = "коды"
+
         # Вторая строка: штрихкод
-        ws['A2'] = barcode
-        
+        ws["A2"] = barcode
+
         # Третья и последующие строки: коды
         for idx, code in enumerate(codes, start=3):
-            ws[f'A{idx}'] = code
-        
+            ws[f"A{idx}"] = code
+
         # Сохраняем файл
         wb.save(output_path)
 
     @classmethod
     def process_file(
-        cls,
-        input_file_path: Path,
-        output_dir: Path,
-        filename: str
+        cls, input_file_path: Path, output_dir: Path, filename: str
     ) -> tuple[Path, str]:
         """
         Обрабатывает входящий файл и создает результирующий файл.
-        
+
         Args:
             input_file_path: Путь к входящему файлу
             output_dir: Директория для сохранения результата
             filename: Оригинальное название файла
-            
+
         Returns:
             tuple: (Путь к результирующему файлу, артикул)
-            
+
         Raises:
             ValueError: При различных ошибках валидации
         """
@@ -104,21 +99,23 @@ class FileProcessor:
         article = cls.extract_article(filename)
         if not article:
             raise ValueError("Не удалось извлечь артикул из названия файла")
-        
+
         # 2. Ищем штрихкод в справочнике
         barcode = ReferenceBook.get_barcode(article)
         if not barcode:
-            raise ValueError(f"Артикул «{article}» (Файл {filename}) не найден в справочнике")
-        
+            raise ValueError(
+                f"Артикул «{article}» (Файл {filename}) не найден в справочнике"
+            )
+
         # 3. Читаем коды из файла
         codes = cls.read_codes_from_file(input_file_path)
         if not codes:
             raise ValueError(f"В файле «{filename}» не найдено кодов в столбце B")
-        
+
         # 4. Создаем результирующий файл
         output_filename = f"codes_{article}.xlsx"
         output_path = output_dir / output_filename
-        
+
         cls.create_result_file(barcode, codes, output_path)
-        
+
         return output_path, article

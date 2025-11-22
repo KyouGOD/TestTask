@@ -4,8 +4,10 @@ from typing import Dict, Optional
 from datetime import datetime, timedelta
 import pandas as pd
 
+
 class ReferenceBook:
     """Класс для хранения справочника(уйти от использования глобальных переменных)"""
+
     _cache: Dict[str, str] = {}
     _loaded = False
     _lock = asyncio.Lock()
@@ -22,7 +24,7 @@ class ReferenceBook:
                 if time_since_load < cls._cache_lifetime:
                     print(f"Справочник актуален (загружен {time_since_load} назад)")
                     return
-            
+
             print("Начинаем загрузку справочника...")
             df = pd.read_excel(path, usecols=[0, 5], dtype=str, engine="openpyxl")
             df.dropna(inplace=True)
@@ -35,6 +37,6 @@ class ReferenceBook:
             print(f"Справочник успешно загружен: {len(cls._cache):,} записей")
 
     @classmethod
-    def get_barcode(cls, article: str) -> Optional[str]:   
+    def get_barcode(cls, article: str) -> Optional[str]:
         """Синхронный метод — теперь можно! Кэш уже гарантированно загружен"""
         return cls._cache.get(str(article).strip().upper())
