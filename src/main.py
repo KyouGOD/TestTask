@@ -3,6 +3,7 @@ import logging
 import asyncio
 import tempfile
 from pathlib import Path
+from datetime import datetime, timedelta
 from collections import defaultdict
 from aiogram import F
 from aiogram.filters import Command
@@ -26,7 +27,14 @@ logging.basicConfig(
 
 logger = logging.getLogger(__name__)
 
-user_state = defaultdict(lambda: {"results": [], "timer": None, "chat_id": None})
+user_state = defaultdict(
+    lambda: {
+        "results": [],
+        "timer": None,
+        "chat_id": None,
+        "last_activity": datetime.now(),
+    }
+)
 
 
 @router.message(Command("start"))
@@ -130,6 +138,21 @@ async def schedule_batch(user_id: int):
     state["timer"] = task
 
 
+async def cleanup_old_states():
+    while True:
+        await asyncio.sleep(3600)
+        now = datetime.now()
+        to_delete = []
+
+        for user_id, state in user_state.items():
+            if now - state["last_activity"] > timedelta(hours=1):
+                to_delete.append(user_id)
+
+        for user_id in to_delete:
+            logger.info("Очистка устаревших данных пользователя %s", user_id)
+            del user_state[user_id]
+
+
 async def on_startup():
     if not REFERENCE_PATH.exists():
         logger.error("ОШИБКА: Справочник не найден: %s", REFERENCE_PATH)
@@ -169,6 +192,7 @@ async def on_startup():
                 await asyncio.sleep(60)
 
     asyncio.create_task(_reference_refresher())
+    asyncio.create_task(cleanup_old_states())
 
 
 async def main():
