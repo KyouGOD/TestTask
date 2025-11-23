@@ -9,7 +9,7 @@ logger = logging.getLogger(__name__)
 
 
 class ReferenceBook:
-    """Класс для хранения справочника(уйти от использования глобальных переменных)"""
+    """Класс для хранения справочника"""
 
     _cache: Dict[str, str] = {}
     _loaded = False
@@ -35,7 +35,13 @@ class ReferenceBook:
             df.iloc[:, 0] = df.iloc[:, 0].str.strip().str.upper()
             df.iloc[:, 1] = df.iloc[:, 1].str.strip()
 
-            cls._cache = dict(zip(df.iloc[:, 0], df.iloc[:, 1]))
+            new_cache = dict(zip(df.iloc[:, 0], df.iloc[:, 1]))
+
+            if not new_cache and cls._cache:
+                logger.warning("Новый справочник пуст, оставляем старый кэш")
+                return
+
+            cls._cache = new_cache
             cls._loaded = True
             cls._last_load_time = datetime.now()
             logger.info("Справочник успешно загружен: %s записей", len(cls._cache))
